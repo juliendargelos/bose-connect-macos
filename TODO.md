@@ -38,7 +38,7 @@
     - [x] Stage for QA.
     - [ ] Stage for Deploy.
     - [ ] Stage for Production.
-        - [ ] Release to AUR Arch Linux.
+        - [ ] Release as a package.
         - [ ] Release to Debian or others.
 
 - [ ] Original list.

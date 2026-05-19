@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "library/based.h"
+#include "library/alias_store.h"
 #include "library/transport.h"
 #include "library/util.h"
 #include "main.h"
@@ -14,11 +15,19 @@
 #define OPTION_CONNECT_DEVICE    2
 #define OPTION_DISCONNECT_DEVICE 3
 #define OPTION_REMOVE_DEVICE     4
+#define OPTION_ADD_ALIAS         6
+#define OPTION_REMOVE_ALIAS      7
+#define OPTION_ALIAS             8
+#define OPTION_LIST_DEVICES      9
 #define OPTION_SEND_PACKET       1
+
+static int resolve_target_address(const char *address_argument,
+                                  const char *alias_argument,
+                                  char out_address[ADDRESS_STRING_LEN]);
 
 static void usage() {
   const char *message =
-      "Usage: %s [options] <address>\n"
+      "Usage: %s [options] [address]\n"
 
       "\t-h, --help\n"
       "\t\tPrint the help message.\n"
@@ -82,9 +91,132 @@ static void usage() {
       "\t\tDisconnect the device at address.\n"
 
       "\t--remove-device=<address>\n"
-      "\t\tRemove the device at address from the pairing list.\n";
+      "\t\tRemove the device at address from the pairing list.\n"
+
+      "\t--alias=<name>\n"
+      "\t\tUse a saved alias instead of a Bluetooth address argument.\n"
+
+      "\t--add-alias=<name> <address>\n"
+      "\t\tSave or update alias for a Bluetooth address.\n"
+
+      "\t--remove-alias=<name>\n"
+      "\t\tRemove a saved alias.\n"
+
+      "\t--list-devices\n"
+      "\t\tList paired Bluetooth devices and saved aliases.\n";
 
   printf(message, PROGRAM_NAME);
+}
+
+static int do_add_alias(const char *alias, const char *address) {
+  if (alias_store_add(alias, address) != 0) {
+    perror("Could not add alias");
+    return 1;
+  }
+
+  printf("Saved alias '%s' -> %s\n", alias, address);
+  return 0;
+}
+
+static int resolve_alias_address_for_add(const char *address_argument,
+                                         const char *alias_argument,
+                                         char out_address[ADDRESS_STRING_LEN]) {
+  if (address_argument != NULL) {
+    return resolve_target_address(address_argument, NULL, out_address);
+  }
+
+  if (alias_argument == NULL) {
+    fprintf(stderr,
+            "Address argument is required for --add-alias unless --alias is "
+            "provided.\n");
+    return 1;
+  }
+
+  if (alias_store_resolve(alias_argument, out_address) != 0) {
+    perror("Could not resolve alias for --add-alias");
+    return 1;
+  }
+
+  return 0;
+}
+
+static int do_remove_alias(const char *alias) {
+  if (alias_store_remove(alias) != 0) {
+    perror("Could not remove alias");
+    return 1;
+  }
+
+  printf("Removed alias '%s'\n", alias);
+  return 0;
+}
+
+static int print_saved_aliases(void) {
+  struct AliasEntry aliases[256];
+  size_t            num_aliases = 0;
+
+  if (alias_store_read_all(aliases, 256, &num_aliases) != 0) {
+    perror("Could not read aliases");
+    return 1;
+  }
+
+  printf("Saved aliases: %zu\n", num_aliases);
+  for (size_t i = 0; i < num_aliases; ++i) {
+    printf("\t%s -> %s\n", aliases[i].alias, aliases[i].address);
+  }
+
+  return 0;
+}
+
+static int do_list_devices(void) {
+  struct TransportDevice devices[256];
+  size_t                 num_devices = 0;
+
+  if (transport_list_paired_devices(devices, 256, &num_devices) != 0) {
+    perror("Could not list Bluetooth devices");
+    return 1;
+  }
+
+  printf("Paired Bluetooth devices: %zu\n", num_devices);
+  for (size_t i = 0; i < num_devices && i < 256; ++i) {
+    printf("\t%s | %s | %s\n", devices[i].connected ? "*" : " ",
+           devices[i].address[0] ? devices[i].address : "(unknown)",
+           devices[i].name[0] ? devices[i].name : "(unnamed)");
+  }
+  printf("\t[*] Indicates currently connected.\n");
+
+  return print_saved_aliases();
+}
+
+static int resolve_target_address(const char *address_argument,
+                                  const char *alias_argument,
+                                  char out_address[ADDRESS_STRING_LEN]) {
+  if (alias_argument != NULL) {
+    if (alias_store_resolve(alias_argument, out_address) != 0) {
+      perror("Could not resolve alias");
+      return 1;
+    }
+    return 0;
+  }
+
+  if (address_argument == NULL) {
+    fprintf(stderr, "A Bluetooth address argument is required.\n");
+    return 1;
+  }
+
+  if (strlen(address_argument) >= ADDRESS_STRING_LEN) {
+    fprintf(stderr, "Invalid Bluetooth address: %s\n", address_argument);
+    return 1;
+  }
+
+  strncpy(out_address, address_argument, ADDRESS_STRING_LEN - 1);
+  out_address[ADDRESS_STRING_LEN - 1] = '\0';
+
+  if (parse_bdaddr(out_address, NULL) != 0) {
+    fprintf(stderr, "Invalid Bluetooth address: %s\n", out_address);
+    return 1;
+  }
+
+  return 0;
 }
 
 int do_get_information(char *address) {
@@ -770,96 +902,199 @@ int main(int argc, char *argv[]) {
       {"connect-device", required_argument, NULL, 2},
       {"disconnect-device", required_argument, NULL, 3},
       {"remove-device", required_argument, NULL, 4},
+      {"add-alias", required_argument, NULL, OPTION_ADD_ALIAS},
+      {"remove-alias", required_argument, NULL, OPTION_REMOVE_ALIAS},
+      {"alias", required_argument, NULL, OPTION_ALIAS},
+      {"list-devices", no_argument, NULL, OPTION_LIST_DEVICES},
       {"send-packet", required_argument, NULL, 1},
       {0, no_argument, NULL, 0}};
 
-  // Find connection address and verify options
+  int   status        = 0;
+  int   command_opt   = 0;
+  char *command_arg   = NULL;
+  char *alias_target  = NULL;
+  char *address_arg   = NULL;
+  char  address[ADDRESS_STRING_LEN] = {0};
+
   int opt_index = 0;
-  int opt       = getopt_long(argc, argv, short_opt, long_opt, &opt_index);
-  switch (opt) {
-  case 'h':
-  case '?':
-    usage();
-    return 0;
-  default:
-    break;
+  int opt       = 0;
+  optind        = 1;
+  while ((opt = getopt_long(argc, argv, short_opt, long_opt, &opt_index)) > 0) {
+    switch (opt) {
+    case 'h':
+      usage();
+      return 0;
+    case OPTION_ALIAS:
+      alias_target = optarg;
+      break;
+    default:
+      if (command_opt == 0) {
+        command_opt = opt;
+        command_arg = optarg;
+      } else {
+        fprintf(stderr, "Only one command option may be given.\n");
+        usage();
+        return 1;
+      }
+      break;
+    }
   }
 
-  if (argc - 1 != optind) {
-    fprintf(stderr, argc <= optind
-                        ? "An address argument must be given.\n"
-                        : "Only one address argument may be given.\n");
+  if (optind < argc) {
+    address_arg = argv[optind];
+    if (optind + 1 < argc) {
+      fprintf(stderr, "Only one address argument may be given.\n");
+      usage();
+      return 1;
+    }
+  }
+
+  if (command_opt == 0) {
+    fprintf(stderr, "A command option must be given.\n");
     usage();
     return 1;
   }
 
-  char *address = argv[optind];
-  int   status  = 0;
-  opt_index     = 0;
-  optind        = 1;
-  while ((opt = getopt_long(argc, argv, short_opt, long_opt, &opt_index)) > 0) {
-    if (status) {
-      break;
+  if (command_opt == OPTION_LIST_DEVICES) {
+    if (address_arg != NULL) {
+      fprintf(stderr, "--list-devices does not take an address argument.\n");
+      return 1;
+    }
+    return do_list_devices();
+  }
+
+  if (command_opt == OPTION_REMOVE_ALIAS) {
+    if (command_arg == NULL) {
+      fprintf(stderr, "Alias is required for --remove-alias.\n");
+      return 1;
+    }
+    if (address_arg != NULL) {
+      fprintf(stderr, "--remove-alias does not take an address argument.\n");
+      return 1;
+    }
+    return do_remove_alias(command_arg);
+  }
+
+  if (command_opt == OPTION_ADD_ALIAS) {
+    char alias_address[ADDRESS_STRING_LEN] = {0};
+    if (command_arg == NULL) {
+      fprintf(stderr, "Alias is required for --add-alias.\n");
+      return 1;
     }
 
-    switch (opt) {
-    case 'i':
-      status = do_get_information(address);
-      break;
-    case 'd':
-      status = do_get_device_status(address);
-      break;
-    case 'f':
-      status = do_get_firmware_version(address);
-      break;
-    case 's':
-      status = do_get_serial_number(address);
-      break;
-    case 'b':
-      status = do_get_battery_level(address);
-      break;
-    case 'a':
-      status = do_get_paired_devices(address);
-      break;
-    case OPTION_DEVICE_ID:
-      status = do_get_device_id(address);
-      break;
-    case 'n':
-      status = do_set_name(address, optarg);
-      break;
-    case 'o':
-      status = do_set_auto_off(address, optarg);
-      break;
-    case 'c':
-      status = do_set_noise_cancelling(address, optarg);
-      break;
-    case 'l':
-      status = do_set_prompt_language(address, optarg);
-      break;
-    case 'v':
-      status = do_set_voice_prompts(address, optarg);
-      break;
-    case 'p':
-      status = do_set_pairing(address, optarg);
-      break;
-    case OPTION_CONNECT_DEVICE:
-      status = do_connect_device(address, optarg);
-      break;
-    case OPTION_DISCONNECT_DEVICE:
-      status = do_disconnect_device(address, optarg);
-      break;
-    case OPTION_REMOVE_DEVICE:
-      status = do_remove_device(address, optarg);
-      break;
-    case 'e':
-      status = do_set_self_voice(address, optarg);
-      break;
-    case OPTION_SEND_PACKET:
-      status = do_send_packet(address, optarg);
-      break;
-    default:
-      status = 1;
+    if (resolve_alias_address_for_add(address_arg, alias_target,
+                                      alias_address) != 0) {
+      return 1;
     }
+
+    return do_add_alias(command_arg, alias_address);
+  }
+
+  if (resolve_target_address(address_arg, alias_target, address) != 0) {
+    return 1;
+  }
+
+  switch (command_opt) {
+  case 'i':
+    status = do_get_information(address);
+    break;
+  case 'd':
+    status = do_get_device_status(address);
+    break;
+  case 'f':
+    status = do_get_firmware_version(address);
+    break;
+  case 's':
+    status = do_get_serial_number(address);
+    break;
+  case 'b':
+    status = do_get_battery_level(address);
+    break;
+  case 'a':
+    status = do_get_paired_devices(address);
+    break;
+  case OPTION_DEVICE_ID:
+    status = do_get_device_id(address);
+    break;
+  case 'n':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --name.\n");
+      return 1;
+    }
+    status = do_set_name(address, command_arg);
+    break;
+  case 'o':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --auto-off.\n");
+      return 1;
+    }
+    status = do_set_auto_off(address, command_arg);
+    break;
+  case 'c':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --noise-cancelling.\n");
+      return 1;
+    }
+    status = do_set_noise_cancelling(address, command_arg);
+    break;
+  case 'l':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --prompt-language.\n");
+      return 1;
+    }
+    status = do_set_prompt_language(address, command_arg);
+    break;
+  case 'v':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --voice-prompts.\n");
+      return 1;
+    }
+    status = do_set_voice_prompts(address, command_arg);
+    break;
+  case 'p':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --pairing.\n");
+      return 1;
+    }
+    status = do_set_pairing(address, command_arg);
+    break;
+  case OPTION_CONNECT_DEVICE:
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --connect-device.\n");
+      return 1;
+    }
+    status = do_connect_device(address, command_arg);
+    break;
+  case OPTION_DISCONNECT_DEVICE:
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --disconnect-device.\n");
+      return 1;
+    }
+    status = do_disconnect_device(address, command_arg);
+    break;
+  case OPTION_REMOVE_DEVICE:
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --remove-device.\n");
+      return 1;
+    }
+    status = do_remove_device(address, command_arg);
+    break;
+  case 'e':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --self-voice.\n");
+      return 1;
+    }
+    status = do_set_self_voice(address, command_arg);
+    break;
+  case OPTION_SEND_PACKET:
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --send-packet.\n");
+      return 1;
+    }
+    status = do_send_packet(address, command_arg);
+    break;
+  default:
+    status = 1;
   }
 
   if (status < 0) {

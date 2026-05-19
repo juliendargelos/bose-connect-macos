@@ -1,5 +1,5 @@
-#ifndef BOSE_CONNECT_APP_LINUX_SRC_MAIN_H
-#define BOSE_CONNECT_APP_LINUX_SRC_MAIN_H
+#ifndef BOSE_CONNECT_SRC_MAIN_H
+#define BOSE_CONNECT_SRC_MAIN_H
 
 int get_socket(char *address);
 

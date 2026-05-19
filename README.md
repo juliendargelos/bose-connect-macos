@@ -1,4 +1,4 @@
-# Bose® Connect App for Linux
+# Bose® Connect App
 
 --- Not Official App ---
 
@@ -6,15 +6,14 @@ Based on [Denton-L project][Denton-L], looks like it is not maintained. I
 created a copy to have an active repository. This project keeps the original
 license GPL-3.0.
 
-If you own a Bose device, you'll know that `Bose Connect` is not available on
-Linux. This program attempts to reverse engineer that app to give the device
-Linux support.
+This program attempts to reverse engineer the `Bose Connect` app behavior for
+desktop usage.
 
 ### Usage
 
 ```text
-Usage: bose-connect-app-linux [options] <address>
-  # address: The Bluetooth address of the Bose's device.
+Usage: bose-connect [options] [address]
+  # address: Optional when --alias=<name> is used.
 
   -h, --help
     Print the help message.
@@ -61,13 +60,21 @@ Usage: bose-connect-app-linux [options] <address>
     Disconnect the device at address.
   --remove-device=<address>
     Remove the device at address from the pairing list.
+  --alias=<name>
+    Use a saved alias instead of the Bluetooth address argument.
+  --add-alias=<name> <address>
+    Save or update an alias for a Bluetooth address.
+  --remove-alias=<name>
+    Remove a saved alias.
+  --list-devices
+    List paired Bluetooth devices and saved aliases.
 ```
 
 ## Build and Installation
 
 The executable produced by the build will be
-`./src/build/bose-connect-app-linux` and the installation will be
-`/usr/local/bin/bose-connect-app-linux`.
+`./src/build/bose-connect` and the installation will be
+`/usr/local/bin/bose-connect`.
 
 ### Dependencies
 
@@ -83,10 +90,10 @@ brew install cmake
 
 The app now uses Apple's `IOBluetooth` framework directly.
 
-### Docker (Legacy Linux path)
+### Docker (Legacy path)
 
-The Docker workflow is kept only for the historical Linux setup. The native
-build below is the primary path for macOS.
+The Docker workflow is kept only as a legacy setup. The native build below is
+the primary path for macOS.
 
 Follow the next steps:
 
@@ -114,16 +121,14 @@ docker exec \
   --user $(id -u "${USER}") \
   --interactive \
   --tty \
-  bose-connect-app-linux \
-  /root/bose-connect-app-linux/script/build-prod.bash
+  bose-connect \
+  /root/bose-connect/script/build-prod.bash
 
 # Enjoy.
-./src/build/bose-connect-app-linux
+./src/build/bose-connect
 ```
 
-*Note: I created this in `Arch Linux`. It should be crash in `Ubuntu` because
-the library of bluetooth is different. If it fails, please
-[create an issue][new-issue], and some fixes will come soon.*
+*Note: The native macOS path is the maintained setup for this repository.*
 
 ### Local
 
@@ -134,20 +139,29 @@ The local build requires `clang`, `make`, and `cmake`.
 ./src/script/build-prod.bash
 
 # Enjoy.
-./src/build/bose-connect-app-linux
+./src/build/bose-connect
 ```
 
 ### Install
 
 Run `./src/script/install-prod.bash` to install the application. It will place
-in `/usr/local/bin/bose-connect-app-linux`. The `PREFIX` and `DESTDIR`
+in `/usr/local/bin/bose-connect`. The `PREFIX` and `DESTDIR`
 variables are assignable and have the traditional meaning. For more information
 reefer to the [official web site of CMake][cmake-install].
 
 The app expects the Bose device Bluetooth address, for example:
 
 ```bash
-./src/build/bose-connect-app-linux --battery-level E4:58:BC:3C:B7:AF
+./src/build/bose-connect --battery-level E4:58:BC:3C:B7:AF
+```
+
+Aliases are stored in `~/.bose-connect-devices` as simple `alias=address`
+lines:
+
+```bash
+./src/build/bose-connect --add-alias=qc35 E4:58:BC:3C:B7:AF
+./src/build/bose-connect --battery-level --alias=qc35
+./src/build/bose-connect --list-devices
 ```
 
 ### Uninstall
@@ -185,4 +199,4 @@ program works on any other devices.
 
 [cmake-install]: https://cmake.org/cmake/help/latest/manual/cmake.1.html#install-a-project
 
-[new-issue]: https://github.com/airvzxf/bose-connect-app-linux/issues/new
+[new-issue]: https://github.com/airvzxf/bose-connect/issues/new

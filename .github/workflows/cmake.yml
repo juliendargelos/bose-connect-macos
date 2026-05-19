@@ -40,8 +40,8 @@ jobs:
         run: >
           docker exec \
             --user $(id -u "${USER}") \
-            bose-connect-app-linux \
-            /root/bose-connect-app-linux/script/build-prod.bash
+            bose-connect \
+            /root/bose-connect/script/build-prod.bash
 
       - name: Get binary's name
         run: |

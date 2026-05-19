@@ -91,11 +91,11 @@ docker exec \
   --user $(id -u "${USER}") \
   --interactive \
   --tty \
-  bose-connect-app-linux \
-  /root/bose-connect-app-linux/script/build-dev.bash
+  bose-connect \
+  /root/bose-connect/script/build-dev.bash
 
 # Enjoy.
-./src/build/bose-connect-app-linux
+./src/build/bose-connect
 ```
 
 ### Local
@@ -112,10 +112,10 @@ scanners.
 ./src/script/build-dev.bash
 
 # Enjoy.
-./build/bose-connect-app-linux
+./build/bose-connect
 ```
 
-[new-issue]: https://github.com/airvzxf/bose-connect-app-linux/issues/new
+[new-issue]: https://github.com/airvzxf/bose-connect/issues/new
 
 [fork-a-repo]: https://help.github.com/articles/fork-a-repo/
 

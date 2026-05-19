@@ -317,3 +317,59 @@ int transport_write(int handle, const void *buffer, size_t buffer_n) {
     return (int)total;
   }
 }
+
+int transport_list_paired_devices(struct TransportDevice *devices,
+                                  size_t max_devices, size_t *num_devices) {
+  @autoreleasepool {
+    if (num_devices == NULL) {
+      errno = EINVAL;
+      return -1;
+    }
+
+    NSArray *paired_devices = [IOBluetoothDevice pairedDevices];
+    if (paired_devices == nil) {
+      *num_devices = 0;
+      return 0;
+    }
+
+    *num_devices = paired_devices.count;
+    if (devices == NULL || max_devices == 0) {
+      return 0;
+    }
+
+    const size_t count = paired_devices.count < max_devices
+                             ? paired_devices.count
+                             : max_devices;
+
+    for (size_t i = 0; i < count; ++i) {
+      IOBluetoothDevice *device = paired_devices[i];
+      NSString *name_or_address = [device nameOrAddress];
+      NSString *address_string  = [device addressString];
+
+      devices[i].name[0]    = '\0';
+      devices[i].address[0] = '\0';
+
+      if (name_or_address != nil) {
+        (void)strncpy(devices[i].name, name_or_address.UTF8String,
+                      TRANSPORT_DEVICE_NAME_MAX - 1);
+        devices[i].name[TRANSPORT_DEVICE_NAME_MAX - 1] = '\0';
+      }
+
+      if (address_string != nil) {
+        (void)strncpy(devices[i].address, address_string.UTF8String,
+                      TRANSPORT_DEVICE_ADDRESS_MAX - 1);
+        devices[i].address[TRANSPORT_DEVICE_ADDRESS_MAX - 1] = '\0';
+
+        for (size_t j = 0; devices[i].address[j] != '\0'; ++j) {
+          if (devices[i].address[j] == '-') {
+            devices[i].address[j] = ':';
+          }
+        }
+      }
+
+      devices[i].connected = [device isConnected] ? 1 : 0;
+    }
+
+    return 0;
+  }
+}

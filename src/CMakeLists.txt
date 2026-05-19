@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 
-set(PROJECT_NAME bose-connect-app-linux)
+set(PROJECT_NAME bose-connect)
 
 # Set the project name and version.
 project(${PROJECT_NAME} VERSION 1.0 LANGUAGES C OBJC)
@@ -29,6 +29,8 @@ add_executable(
         main.h
         library/based.c
         library/based.h
+        library/alias_store.c
+        library/alias_store.h
         library/bluetooth.c
         library/bluetooth.h
         library/transport.h
