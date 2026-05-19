@@ -1,4 +1,4 @@
-# To-do's list
+# Bose Connect macOS - To-do list
 
 - [ ] Functionality.
     - [ ] Add existed function "send package" as an option.
@@ -46,5 +46,5 @@
         - [ ] Current status of all setters currently implemented.
         - [ ] Date of manufacturing.
     - [ ] Get/set volume.
-    - [ ] Port to macOS (and maybe Windows).
+    - [x] Port to macOS (and maybe Windows).
     - [ ] Firmware updates?

@@ -101,7 +101,10 @@ int set_voice_prompts(int sock, int on);
 
 int set_auto_off(int sock, enum AutoOff minutes);
 
-int set_noise_cancelling(int sock, enum NoiseCancelling level);
+int set_noise_cancelling(int sock, unsigned int device_id,
+                         enum NoiseCancelling level);
+
+int set_noise_mode(int sock, unsigned int mode_index);
 
 int get_device_status(int sock, char name[MAX_NAME_LEN],
                       enum PromptLanguage *language, enum AutoOff *minutes,

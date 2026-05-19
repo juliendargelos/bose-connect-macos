@@ -68,6 +68,10 @@ static void usage() {
       "\t\tChange the noise cancelling level.\n"
       "\t\tlevel: high, low, off\n"
 
+      "\t-m <mode>, --mode=<mode>\n"
+      "\t\tChange the noise cancelling mode.\n"
+      "\t\tmode: quiet, aware, custom-1, custom-2\n"
+
       "\t-l <language>, --prompt-language=<language>\n"
       "\t\tChange the voice-prompt language.\n"
       "\t\tlanguage: en, fr, it, de, es, pt, zh, ko, nl, ja, sv\n"
@@ -419,7 +423,50 @@ static int do_set_noise_cancelling(char *address, const char *arg) {
     return 1;
   }
 
-  status = set_noise_cancelling(sock, nc);
+  status = set_noise_cancelling(sock, device_id, nc);
+  transport_close(sock);
+  return status;
+}
+
+static int parse_noise_mode(const char *arg, unsigned int *mode_index) {
+  if (strcmp(arg, "quiet") == 0) {
+    *mode_index = 0x00;
+    return 0;
+  }
+
+  if (strcmp(arg, "aware") == 0) {
+    *mode_index = 0x01;
+    return 0;
+  }
+
+  if (strcmp(arg, "custom-1") == 0) {
+    *mode_index = 0x02;
+    return 0;
+  }
+
+  if (strcmp(arg, "custom-2") == 0) {
+    *mode_index = 0x03;
+    return 0;
+  }
+
+  return 1;
+}
+
+static int do_set_noise_mode(char *address, const char *arg) {
+  int sock = get_socket(address);
+  if (sock == -1) {
+    return 1;
+  }
+
+  unsigned int mode_index = 0;
+  if (parse_noise_mode(arg, &mode_index) != 0) {
+    fprintf(stderr, "Invalid noise mode argument: %s\n", arg);
+    usage();
+    transport_close(sock);
+    return 1;
+  }
+
+  int status = set_noise_mode(sock, mode_index);
   transport_close(sock);
   return status;
 }
@@ -828,33 +875,81 @@ static int do_get_device_id(char *address) {
 }
 
 static int do_send_packet(char *address, const char *arg) {
-  int char_type_pointer_size = sizeof(char *);
-  int sock                   = get_socket(address);
+  int sock = get_socket(address);
 
   if (sock == -1) {
     return 1;
   }
 
-  uint8_t send[char_type_pointer_size / 2];
-  for (size_t i = 0; arg[i * 2]; ++i) {
-    if (str_to_byte(&arg[i * 2], &send[i]) != 0) {
+  char *arg_copy = strdup(arg);
+  if (arg_copy == NULL) {
+    transport_close(sock);
+    return 1;
+  }
+
+  size_t packet_index = 0;
+  char * save_pointer = NULL;
+  for (char *token = strtok_r(arg_copy, ",", &save_pointer); token != NULL;
+       token         = strtok_r(NULL, ",", &save_pointer)) {
+    size_t arg_length = strlen(token);
+    if (arg_length == 0 || (arg_length % 2) != 0) {
+      fprintf(stderr, "Each send-packet value must contain an even number of hexadecimal digits.\n");
+      free(arg_copy);
       transport_close(sock);
       return 1;
     }
+
+    size_t send_n = arg_length / 2;
+    if (send_n > MAX_BT_PACK_LEN) {
+      fprintf(stderr, "The send-packet argument is too long.\n");
+      free(arg_copy);
+      transport_close(sock);
+      return 1;
+    }
+
+    uint8_t send[MAX_BT_PACK_LEN] = {0};
+    for (size_t i = 0; i < send_n; ++i) {
+      if (str_to_byte(&token[i * 2], &send[i]) != 0) {
+        free(arg_copy);
+        transport_close(sock);
+        return 1;
+      }
+    }
+
+    uint8_t received[MAX_BT_PACK_LEN];
+    int     received_n = send_packet(sock, send, send_n, received);
+
+    if (received_n < 0) {
+      if (errno == EAGAIN) {
+        if (packet_index > 0) {
+          printf("Received package %zu:\n\t(no response)\n", packet_index + 1);
+        } else {
+          printf("Received package:\n\t(no response)\n");
+        }
+        packet_index += 1;
+        continue;
+      }
+
+      free(arg_copy);
+      transport_close(sock);
+      return received_n;
+    }
+
+    if (packet_index > 0) {
+      printf("Received package %zu:\n\t", packet_index + 1);
+    } else {
+      printf("Received package:\n\t");
+    }
+
+    for (size_t i = 0; i < (size_t)received_n; ++i) {
+      printf("%02x ", received[i]);
+    }
+    printf("\n");
+
+    packet_index += 1;
   }
 
-  uint8_t received[MAX_BT_PACK_LEN];
-  int     received_n = send_packet(sock, send, sizeof(send), received);
-  if (received_n < 0) {
-    transport_close(sock);
-    return received_n;
-  }
-
-  printf("Received package:\n\t");
-  for (size_t i = 0; i < received_n; ++i) {
-    printf("%02x ", received[i]);
-  }
-  printf("\n");
+  free(arg_copy);
 
   transport_close(sock);
   return 0;
@@ -882,7 +977,7 @@ int get_socket(char *address) {
 }
 
 int main(int argc, char *argv[]) {
-  static const char *        short_opt  = "hidfsban:n:o:c:l:v:p:e:";
+  static const char *        short_opt  = "hidfsban:n:o:c:m:l:v:p:e:";
   static const struct option long_opt[] = {
       {"help", no_argument, NULL, 'h'},
       {"info", no_argument, NULL, 'i'},
@@ -895,6 +990,7 @@ int main(int argc, char *argv[]) {
       {"name", required_argument, NULL, 'n'},
       {"auto-off", required_argument, NULL, 'o'},
       {"noise-cancelling", required_argument, NULL, 'c'},
+      {"mode", required_argument, NULL, 'm'},
       {"prompt-language", required_argument, NULL, 'l'},
       {"voice-prompts", required_argument, NULL, 'v'},
       {"pairing", required_argument, NULL, 'p'},
@@ -1036,6 +1132,13 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     status = do_set_noise_cancelling(address, command_arg);
+    break;
+  case 'm':
+    if (command_arg == NULL) {
+      fprintf(stderr, "Missing required argument for --mode.\n");
+      return 1;
+    }
+    status = do_set_noise_mode(address, command_arg);
     break;
   case 'l':
     if (command_arg == NULL) {

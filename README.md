@@ -1,13 +1,16 @@
-# Bose® Connect App
+# Bose Connect macOS
 
 --- Not Official App ---
 
-Based on [Denton-L project][Denton-L], looks like it is not maintained. I
-created a copy to have an active repository. This project keeps the original
-license GPL-3.0.
+This project is based on
+[`airvzxf/bose-connect-app-linux`](https://github.com/airvzxf/bose-connect-app-linux.git),
+with a maintained macOS-native focus.
+
+The original reverse-engineering lineage comes from [Denton-L project][Denton-L].
+This project keeps the original GPL-3.0 license.
 
 This program attempts to reverse engineer the `Bose Connect` app behavior for
-desktop usage.
+desktop usage on macOS.
 
 ### Usage
 
@@ -42,6 +45,9 @@ Usage: bose-connect [options] [address]
   -c <level>, --noise-cancelling=<level>
     Change the noise cancelling level.
     level: high, low, off
+  -m <mode>, --mode=<mode>
+    Change the noise cancelling mode.
+    mode: quiet, aware, custom-1, custom-2
   -l <language>, --prompt-language=<language>
     Change the voice-prompt language.
     language: en, fr, it, de, es, pt, zh, ko, nl, ja, sv
@@ -184,16 +190,13 @@ functionality, please review the file [DEVELOPMENT.md][details-file].
 
 ## Disclaimer
 
-This has only been tested on Bose `QuietComfort 35's` with firmware 1.3.2,
-1.2.9, 1.06 and `SoundLink II's` with firmware 2.1.1. I cannot ensure that this
-program works on any other devices.
+This has only been tested on Bose `QuietComfort` with firmware 1.0.6. I cannot
+ensure that this program works on any other devices.
 
 
 [Denton-L]: https://github.com/Denton-L/based-connect
 
 [details-file]: ./DEVELOPMENT.md
-
-[todo.md]: ./TODO.md
 
 [contributing]: ./CONTRIBUTING.md
 

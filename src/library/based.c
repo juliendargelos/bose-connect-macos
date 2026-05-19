@@ -38,9 +38,14 @@
   { 0xff, 0xff, 0xff, 0xff, 0x00, 0xff }
 #define SET_NOISE_CANCELLING_SEND                                              \
   { 0x01, 0x06, 0x02, 0x01, ANY }
+#define SET_NOISE_MODE_SEND                                                     \
+  { 0x1f, 0x03, 0x05, 0x02, ANY, 0x01, ANY }
+#define SET_NOISE_MODE_ACK                                                      \
+  { 0x1f, 0x03, 0x07, 0x00 }
 #define NOISE_CANCELLING_14 0x4014
 #define NOISE_CANCELLING_20 0x4020
 #define NOISE_CANCELLING_0C 0x400c
+#define NOISE_CANCELLING_75 0x4075
 #define GET_DEVICE_STATUS_SEND                                                 \
   { 0x01, 0x01, 0x05, 0x00 }
 #define GET_DEVICE_STATUS_ACK                                                  \
@@ -101,6 +106,7 @@ int has_noise_cancelling(unsigned int device_id) {
   case NOISE_CANCELLING_14:
   case NOISE_CANCELLING_20:
   case NOISE_CANCELLING_0C:
+  case NOISE_CANCELLING_75:
     return 1;
   default:
     return 0;
@@ -411,35 +417,187 @@ int set_auto_off(int sock, enum AutoOff minutes) {
 }
 
 static int get_noise_cancelling(int sock, enum NoiseCancelling *level) {
-  static const uint8_t ack[]  = GET_NOISE_CANCELLING_ACK;
-  static const uint8_t mask[] = GET_NOISE_CANCELLING_MASK;
-  uint8_t              buffer[sizeof(ack)];
+  uint8_t header[CN_BASE_PACK_LEN] = {0};
+  int     status                    = read_exact(sock, header, sizeof(header));
+  if (status != (int)sizeof(header)) {
+    return status ? status : 1;
+  }
 
-  int status = read_check(sock, buffer, sizeof(buffer), ack, mask);
+  if (header[0] != 0x01 || (header[1] != 0x05 && header[1] != 0x06)) {
+    return 1;
+  }
+
+  const int payload_len = header[BYTES_POSITION_3];
+  if (payload_len <= 0 || payload_len > MAX_BT_PACK_LEN) {
+    return 1;
+  }
+
+  uint8_t payload[MAX_BT_PACK_LEN] = {0};
+  status = read_exact(sock, payload, (size_t)payload_len);
+  if (status != payload_len) {
+    return status ? status : 1;
+  }
+
+  if (header[1] == 0x05) {
+    if (header[2] != 0x03 || payload_len != 3 || payload[0] != 0x0b) {
+      return 1;
+    }
+
+    *level = (enum NoiseCancelling)payload[1];
+    return 0;
+  }
+
+  if (header[2] == 0x03) {
+    if (payload_len < 2 || payload[1] != 0x0b) {
+      return 1;
+    }
+    *level = (enum NoiseCancelling)payload[0];
+    return 0;
+  }
+
+  if (payload_len != 1) {
+    return 1;
+  }
+
+  *level = (enum NoiseCancelling)payload[0];
+  return 0;
+}
+
+static int map_noise_cancelling_for_device(unsigned int device_id,
+                                           enum NoiseCancelling raw_level,
+                                           enum NoiseCancelling *mapped_level) {
+  const uint8_t raw_value = (uint8_t)raw_level;
+
+  if (device_id == NOISE_CANCELLING_75) {
+    switch (raw_value) {
+    case 0x00:
+    case 0x01:
+    case 0x02:
+      *mapped_level = NC_HIGH;
+      return 0;
+    case 0x03:
+    case 0x04:
+    case 0x05:
+    case 0x06:
+    case 0x07:
+      *mapped_level = NC_LOW;
+      return 0;
+    case 0x08:
+    case 0x09:
+    case 0x0a:
+      *mapped_level = NC_OFF;
+      return 0;
+    default:
+      return 1;
+    }
+  }
+
+  switch (raw_level) {
+  case NC_HIGH:
+  case NC_LOW:
+  case NC_OFF:
+    *mapped_level = raw_level;
+    return 0;
+  default:
+    return 1;
+  }
+}
+
+static int map_noise_cancelling_to_raw(unsigned int device_id,
+                                       enum NoiseCancelling level,
+                                       uint8_t *raw_level) {
+  if (device_id == NOISE_CANCELLING_75) {
+    switch (level) {
+    case NC_OFF:
+      *raw_level = 0x0a;
+      return 0;
+    case NC_LOW:
+      *raw_level = 0x05;
+      return 0;
+    case NC_HIGH:
+      *raw_level = 0x00;
+      return 0;
+    default:
+      return 1;
+    }
+  }
+
+  switch (level) {
+  case NC_OFF:
+  case NC_LOW:
+  case NC_HIGH:
+    *raw_level = (uint8_t)level;
+    return 0;
+  default:
+    return 1;
+  }
+}
+
+int set_noise_cancelling(int sock, unsigned int device_id,
+                         enum NoiseCancelling level) {
+  static uint8_t send[]  = SET_NOISE_CANCELLING_SEND;
+  static const uint8_t get_legacy[] = { 0x01, 0x05, 0x01, 0x00 };
+  uint8_t        raw_level = 0;
+  int status = map_noise_cancelling_to_raw(device_id, level, &raw_level);
   if (status) {
     return status;
   }
 
-  *level = (enum NoiseCancelling)buffer[BYTES_POSITION_4];
-  return 0;
-}
+  send[BYTES_POSITION_4] = raw_level;
 
-int set_noise_cancelling(int sock, enum NoiseCancelling level) {
-  static uint8_t send[]  = SET_NOISE_CANCELLING_SEND;
-  send[BYTES_POSITION_4] = level;
-
-  int status = transport_write(sock, send, sizeof(send));
+  status = transport_write(sock, send, sizeof(send));
   if (status != (int)sizeof(send)) {
     return status ? status : 1;
   }
 
+  enum NoiseCancelling got_raw_level = NC_UNKNOWN;
+  if (device_id == NOISE_CANCELLING_75) {
+    enum NoiseCancelling ignored_level = NC_UNKNOWN;
+    status = get_noise_cancelling(sock, &ignored_level);
+    if (status) {
+      return status;
+    }
+
+    status = transport_write(sock, get_legacy, sizeof(get_legacy));
+    if (status != (int)sizeof(get_legacy)) {
+      return status ? status : 1;
+    }
+
+    status = get_noise_cancelling(sock, &got_raw_level);
+    if (status) {
+      return status;
+    }
+  } else {
+    status = get_noise_cancelling(sock, &got_raw_level);
+    if (status) {
+      return status;
+    }
+  }
+
   enum NoiseCancelling got_level = NC_UNKNOWN;
-  status                         = get_noise_cancelling(sock, &got_level);
+  status = map_noise_cancelling_for_device(device_id, got_raw_level,
+                                            &got_level);
   if (status) {
     return status;
   }
 
-  return (int)(level - got_level);
+  return level == got_level ? 0 : 1;
+}
+
+int set_noise_mode(int sock, unsigned int mode_index) {
+  if (mode_index > 0xff) {
+    return 1;
+  }
+
+  static uint8_t send[]  = SET_NOISE_MODE_SEND;
+  static const uint8_t ack[] = SET_NOISE_MODE_ACK;
+
+  uint8_t mode = (uint8_t)mode_index;
+
+  send[BYTES_POSITION_4] = (uint8_t)mode_index;
+  send[6] = (uint8_t)(0xc5u - mode);
+
+  return write_check(sock, send, sizeof(send), ack, sizeof(ack));
 }
 
 int get_device_status(int sock, char name[MAX_NAME_LEN],
@@ -481,7 +639,13 @@ int get_device_status(int sock, char name[MAX_NAME_LEN],
   }
 
   if (has_noise_cancelling(device_id)) {
-    status = get_noise_cancelling(sock, level);
+    enum NoiseCancelling raw_level = NC_UNKNOWN;
+    status                         = get_noise_cancelling(sock, &raw_level);
+    if (status) {
+      return status;
+    }
+
+    status = map_noise_cancelling_for_device(device_id, raw_level, level);
     if (status) {
       return status;
     }
