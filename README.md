@@ -71,11 +71,22 @@ The executable produced by the build will be
 
 ### Dependencies
 
-* BlueZ
-    * `bluez-libs` on Arch Linux
-    * `libbluetooth-dev` on Debian and Ubuntu
+* macOS (Apple Silicon)
+* Xcode Command Line Tools (`xcode-select --install`)
+* CMake
 
-### Docker
+Install CMake using Homebrew:
+
+```bash
+brew install cmake
+```
+
+The app now uses Apple's `IOBluetooth` framework directly.
+
+### Docker (Legacy Linux path)
+
+The Docker workflow is kept only for the historical Linux setup. The native
+build below is the primary path for macOS.
 
 Follow the next steps:
 
@@ -116,8 +127,7 @@ the library of bluetooth is different. If it fails, please
 
 ### Local
 
-The local build require the installation of the follow packages: `gcc`, `make`,
-`cmake`, `pkgconf`, and (`bluez-libs` or `libbluetooth-dev`).
+The local build requires `clang`, `make`, and `cmake`.
 
 ```bash
 # Execute the Bash script.
@@ -133,6 +143,12 @@ Run `./src/script/install-prod.bash` to install the application. It will place
 in `/usr/local/bin/bose-connect-app-linux`. The `PREFIX` and `DESTDIR`
 variables are assignable and have the traditional meaning. For more information
 reefer to the [official web site of CMake][cmake-install].
+
+The app expects the Bose device Bluetooth address, for example:
+
+```bash
+./src/build/bose-connect-app-linux --battery-level E4:58:BC:3C:B7:AF
+```
 
 ### Uninstall
 

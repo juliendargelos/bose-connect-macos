@@ -2,9 +2,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "based.h"
+#include "transport.h"
 #include "util.h"
 
 #define ANY              0x00
@@ -122,10 +122,26 @@ static int masked_memory_cmp(const uint8_t *ptr1, uint8_t *ptr2, size_t num,
   return 0;
 }
 
+static int read_exact(int sock, void *receive, size_t receive_n) {
+  uint8_t *buffer = receive;
+  size_t   total  = 0;
+
+  while (total < receive_n) {
+    int status = transport_read(sock, &buffer[total], receive_n - total);
+    if (status <= 0) {
+      return status;
+    }
+
+    total += (size_t)status;
+  }
+
+  return (int)total;
+}
+
 static int read_check(int sock, uint8_t *receive, size_t receive_n,
                       const uint8_t *ack, const uint8_t *mask) {
-  int status = (int)read(sock, receive, receive_n);
-  if (status != receive_n) {
+  int status = read_exact(sock, receive, receive_n);
+  if (status != (int)receive_n) {
     return status ? status : 1;
   }
 
@@ -137,8 +153,8 @@ static int write_check(int sock, const void *send, size_t send_n,
                        const void *ack, size_t ack_n) {
   uint8_t buffer[ack_n];
 
-  int status = (int)write(sock, send, send_n);
-  if (status != send_n) {
+  int status = transport_write(sock, send, send_n);
+  if (status != (int)send_n) {
     return status ? status : 1;
   }
   return read_check(sock, buffer, sizeof(buffer), ack, NULL);
@@ -146,12 +162,12 @@ static int write_check(int sock, const void *send, size_t send_n,
 
 int send_packet(int sock, const void *send, size_t send_n,
                 uint8_t received[MAX_BT_PACK_LEN]) {
-  int status = (int)write(sock, send, send_n);
-  if (status != send_n) {
+  int status = transport_write(sock, send, send_n);
+  if (status != (int)send_n) {
     return status ? status : 1;
   }
 
-  return (int)read(sock, received, MAX_BT_PACK_LEN);
+  return transport_read(sock, received, MAX_BT_PACK_LEN);
 }
 
 int init_connection(int sock) {
@@ -165,9 +181,9 @@ int init_connection(int sock) {
 
   // Throw away the initial firmware version
   uint8_t garbage[BYTES_POSITION_5];
-  status = (int)read(sock, garbage, sizeof(garbage));
+  status = read_exact(sock, garbage, sizeof(garbage));
 
-  if (status != sizeof(garbage)) {
+  if (status != (int)sizeof(garbage)) {
     return status ? status : 1;
   }
 
@@ -184,15 +200,15 @@ int get_device_id(int sock, unsigned int *device_id, unsigned int *index) {
   }
 
   uint16_t device_id_half_word = 0;
-  status = (int)read(sock, &device_id_half_word, sizeof(device_id_half_word));
-  if (status != sizeof(device_id_half_word)) {
+  status = read_exact(sock, &device_id_half_word, sizeof(device_id_half_word));
+  if (status != (int)sizeof(device_id_half_word)) {
     return status ? status : 1;
   }
 
-  *device_id = bswap_16(device_id_half_word);
+  *device_id = __builtin_bswap16(device_id_half_word);
 
   uint8_t index_byte = 0;
-  status             = (int)read(sock, &index_byte, 1);
+  status             = read_exact(sock, &index_byte, 1);
   if (status != 1) {
     return status ? status : 1;
   }
@@ -212,8 +228,8 @@ static int get_name(int sock, char name[MAX_NAME_LEN]) {
   }
 
   size_t length = (size_t)(buffer[BYTES_POSITION_3] - 1);
-  status        = (int)read(sock, name, length);
-  if (status != length) {
+  status        = read_exact(sock, name, length);
+  if (status != (int)length) {
     return status ? status : 1;
   }
   name[length] = '\0';
@@ -229,8 +245,8 @@ int set_name(int sock, const char *name) {
   str_copy((char *)&send[CN_BASE_PACK_LEN], name, MAX_NAME_LEN);
 
   size_t send_size = CN_BASE_PACK_LEN + length;
-  int    status    = (int)write(sock, send, send_size);
-  if (status != send_size) {
+  int    status    = transport_write(sock, send, send_size);
+  if (status != (int)send_size) {
     return status ? status : 1;
   }
 
@@ -299,18 +315,28 @@ enum PromptLanguage get_language(const char *language) {
   return PL_UNKNOWN;
 }
 static int get_prompt_language(int sock, enum PromptLanguage *language) {
-  // TODO(wolf): ensure that this value is correct
-  // TODO(wolf): figure out what bytes 6 and 7 are for
-  static const uint8_t ack[]  = GET_PROMPT_LANGUAGE_ACK;
-  static const uint8_t mask[] = GET_PROMPT_LANGUAGE_MASK;
-  uint8_t              buffer[sizeof(ack)];
+  uint8_t header[CN_BASE_PACK_LEN] = {0};
+  int     status                    = read_exact(sock, header, sizeof(header));
+  if (status != (int)sizeof(header)) {
+    return status ? status : 1;
+  }
 
-  int status = read_check(sock, buffer, sizeof(buffer), ack, mask);
-  if (status) {
+  if (header[0] != 0x01 || header[1] != 0x03 || header[2] != 0x03) {
+    return 1;
+  }
+
+  const int payload_len = header[BYTES_POSITION_3];
+  if (payload_len <= 0 || payload_len > MAX_BT_PACK_LEN) {
+    return 1;
+  }
+
+  uint8_t payload[MAX_BT_PACK_LEN] = {0};
+  status = read_exact(sock, payload, (size_t)payload_len);
+  if (status != payload_len) {
     return status;
   }
 
-  *language = (enum PromptLanguage)buffer[BYTES_POSITION_4];
+  *language = (enum PromptLanguage)payload[0];
   return 0;
 }
 
@@ -318,8 +344,8 @@ int set_prompt_language(int sock, enum PromptLanguage language) {
   static uint8_t send[]  = SET_PROMPT_LANGUAGE_SEND;
   send[BYTES_POSITION_4] = language;
 
-  int status = (int)write(sock, send, sizeof(send));
-  if (status != sizeof(send)) {
+  int status = transport_write(sock, send, sizeof(send));
+  if (status != (int)sizeof(send)) {
     return status ? status : 1;
   }
 
@@ -370,8 +396,8 @@ int set_auto_off(int sock, enum AutoOff minutes) {
   static uint8_t send[]  = SET_AUTO_OFF_SEND;
   send[BYTES_POSITION_4] = minutes;
 
-  int status = (int)write(sock, send, sizeof(send));
-  if (status != sizeof(send)) {
+  int status = transport_write(sock, send, sizeof(send));
+  if (status != (int)sizeof(send)) {
     return status ? status : 1;
   }
 
@@ -402,8 +428,8 @@ int set_noise_cancelling(int sock, enum NoiseCancelling level) {
   static uint8_t send[]  = SET_NOISE_CANCELLING_SEND;
   send[BYTES_POSITION_4] = level;
 
-  int status = (int)write(sock, send, sizeof(send));
-  if (status != sizeof(send)) {
+  int status = transport_write(sock, send, sizeof(send));
+  if (status != (int)sizeof(send)) {
     return status ? status : 1;
   }
 
@@ -426,8 +452,8 @@ int get_device_status(int sock, char name[MAX_NAME_LEN],
     return status;
   }
   static const uint8_t send[] = GET_DEVICE_STATUS_SEND;
-  status                      = (int)write(sock, send, sizeof(send));
-  if (status != sizeof(send)) {
+  status                      = transport_write(sock, send, sizeof(send));
+  if (status != (int)sizeof(send)) {
     return status ? status : 1;
   }
 
@@ -485,19 +511,33 @@ int set_self_voice(int sock, enum SelfVoice selfVoice) {
 
 int get_firmware_version(int sock, char version[VER_STR_LEN]) {
   static const uint8_t send[] = GET_FIRMWARE_VERSION_SEND;
-  static const uint8_t ack[]  = GET_FIRMWARE_VERSION_ACK;
-
-  int status = write_check(sock, send, sizeof(send), ack, sizeof(ack));
-  if (status) {
-    return status;
-  }
-
-  status = (int)read(sock, version, VER_STR_LEN - 1);
-  if (status != VER_STR_LEN - 1) {
+  int status = transport_write(sock, send, sizeof(send));
+  if (status != (int)sizeof(send)) {
     return status ? status : 1;
   }
 
-  version[VER_STR_LEN - 1] = '\0';
+  uint8_t header[CN_BASE_PACK_LEN] = {0};
+  status = read_exact(sock, header, sizeof(header));
+  if (status != (int)sizeof(header)) {
+    return status ? status : 1;
+  }
+
+  static const uint8_t ack[] = GET_FIRMWARE_VERSION_ACK;
+  if (header[0] != ack[0] || header[1] != ack[1] || header[2] != ack[2]) {
+    return 1;
+  }
+
+  const int payload_len = header[BYTES_POSITION_3];
+  if (payload_len <= 0 || payload_len >= VER_STR_LEN) {
+    return 1;
+  }
+
+  status = read_exact(sock, version, (size_t)payload_len);
+  if (status != payload_len) {
+    return status ? status : 1;
+  }
+
+  version[payload_len] = '\0';
   return 0;
 }
 
@@ -511,13 +551,13 @@ int get_serial_number(int sock, char serial[MAX_SERIAL_SIZE]) {
   }
 
   uint8_t length = 0;
-  status         = (int)read(sock, &length, 1);
+  status         = read_exact(sock, &length, 1);
   if (status != 1) {
     return status ? status : 1;
   }
 
-  status = (int)read(sock, serial, length);
-  if (status != length) {
+  status = read_exact(sock, serial, length);
+  if (status != (int)length) {
     return status ? status : 1;
   }
   serial[length] = '\0';
@@ -527,16 +567,34 @@ int get_serial_number(int sock, char serial[MAX_SERIAL_SIZE]) {
 
 int get_battery_level(int sock, unsigned int *level) {
   static const uint8_t send[] = GET_BATTERY_LEVEL_SEND;
-  static const uint8_t ack[]  = GET_BATTERY_LEVEL_ACK;
-
-  int status = write_check(sock, send, sizeof(send), ack, sizeof(ack));
-  if (status) {
-    return status;
+  int status = transport_write(sock, send, sizeof(send));
+  if (status != (int)sizeof(send)) {
+    return status ? status : 1;
   }
 
-  uint8_t level_byte = 0;
-  (void)read(sock, &level_byte, 1);
-  *level = level_byte;
+  uint8_t header[CN_BASE_PACK_LEN] = {0};
+  status = read_exact(sock, header, sizeof(header));
+  if (status != (int)sizeof(header)) {
+    return status ? status : 1;
+  }
+
+  static const uint8_t ack[] = GET_BATTERY_LEVEL_ACK;
+  if (header[0] != ack[0] || header[1] != ack[1] || header[2] != ack[2]) {
+    return 1;
+  }
+
+  const int payload_len = header[BYTES_POSITION_3];
+  if (payload_len <= 0 || payload_len > MAX_BT_PACK_LEN) {
+    return 1;
+  }
+
+  uint8_t payload[MAX_BT_PACK_LEN] = {0};
+  status = read_exact(sock, payload, (size_t)payload_len);
+  if (status != payload_len) {
+    return status ? status : 1;
+  }
+
+  *level = payload[0];
 
   return 0;
 }
@@ -553,12 +611,12 @@ int get_device_info(int sock, bdaddr_t address, struct Device *device) {
   }
 
   uint8_t length = 0;
-  status         = (int)read(sock, &length, 1);
+  status         = read_exact(sock, &length, 1);
   if (status != 1) {
     return status ? status : 1;
   }
 
-  status = (int)read(sock, &device->address.b, BT_ADDR_LEN);
+  status = read_exact(sock, &device->address.b, BT_ADDR_LEN);
   if (status != BT_ADDR_LEN) {
     return status ? status : 1;
   }
@@ -570,7 +628,7 @@ int get_device_info(int sock, bdaddr_t address, struct Device *device) {
   }
 
   uint8_t status_byte = 0;
-  status              = (int)read(sock, &status_byte, 1);
+  status              = read_exact(sock, &status_byte, 1);
   if (status != 1) {
     return status ? status : 1;
   }
@@ -580,14 +638,14 @@ int get_device_info(int sock, bdaddr_t address, struct Device *device) {
 
   // TODO(wolf): figure out what the first byte of garbage is for
   uint8_t garbage[BYTES_POSITION_2];
-  status = (int)read(sock, &garbage, sizeof(garbage));
-  if (status != sizeof(garbage)) {
+  status = read_exact(sock, &garbage, sizeof(garbage));
+  if (status != (int)sizeof(garbage)) {
     return status ? status : 1;
   }
   length -= sizeof(garbage);
 
-  status = (int)read(sock, device->name, length);
-  if (status != length) {
+  status = read_exact(sock, device->name, length);
+  if (status != (int)length) {
     return status ? status : 1;
   }
   device->name[length] = '\0';
@@ -606,7 +664,7 @@ int get_paired_devices(int sock, bdaddr_t addresses[MAX_NUM_DEVICES],
   }
 
   uint8_t num_devices_byte = 0;
-  status                   = (int)read(sock, &num_devices_byte, 1);
+  status                   = read_exact(sock, &num_devices_byte, 1);
   if (status != 1) {
     return status ? status : 1;
   }
@@ -615,14 +673,14 @@ int get_paired_devices(int sock, bdaddr_t addresses[MAX_NUM_DEVICES],
   *num_devices = (size_t)(num_devices_byte - 1);
 
   uint8_t num_connected_byte = 0;
-  status                     = (int)read(sock, &num_connected_byte, 1);
+  status                     = read_exact(sock, &num_connected_byte, 1);
   if (status != 1) {
     return status ? status : 1;
   }
   *connected = (enum DevicesConnected)num_connected_byte;
 
   for (size_t i = 0; i < num_devices_byte; ++i) {
-    status = (int)read(sock, &addresses[i].b, BT_ADDR_LEN);
+    status = read_exact(sock, &addresses[i].b, BT_ADDR_LEN);
     if (status != BT_ADDR_LEN) {
       return status ? status : 1;
     }

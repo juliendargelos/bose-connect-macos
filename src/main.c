@@ -1,12 +1,12 @@
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/rfcomm.h>
 #include <errno.h>
 #include <getopt.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 #include "library/based.h"
+#include "library/transport.h"
 #include "library/util.h"
 #include "main.h"
 
@@ -141,7 +141,7 @@ static int do_set_name(char *address, const char *arg) {
     status = set_name(sock, name_buffer);
   }
 
-  close(sock);
+  transport_close(sock);
   return status;
 }
 
@@ -156,11 +156,12 @@ static int do_set_prompt_language(char *address, const char *arg) {
   if (pl == PL_UNKNOWN) {
     fprintf(stderr, "Invalid prompt language argument: %s\n", arg);
     usage();
+    transport_close(sock);
     return 1;
   }
 
   const int status = set_prompt_language(sock, pl);
-  close(sock);
+  transport_close(sock);
   return status;
 }
 
@@ -187,11 +188,12 @@ static int do_set_voice_prompts(char *address, const char *arg) {
   if (voice_status == -1) {
     fprintf(stderr, "Invalid voice prompt argument: %s\n", arg);
     usage();
+    transport_close(sock);
     return 1;
   }
 
   const int status = set_voice_prompts(sock, voice_status);
-  close(sock);
+  transport_close(sock);
   return status;
 }
 
@@ -207,11 +209,13 @@ static int do_set_auto_off(char *address, const char *arg) {
 
   if (errno != 0) {
     perror("Error trying to set auto off.\n");
+    transport_close(sock);
     return 1;
   }
 
   if (end_pointer == arg) {
     fprintf(stderr, "No digits were found.\n");
+    transport_close(sock);
     return 1;
   }
 
@@ -228,12 +232,14 @@ static int do_set_auto_off(char *address, const char *arg) {
     if (strcmp(arg, "never") != 0) {
       fprintf(stderr, "Invalid auto-off argument: %s\n", arg);
       usage();
+      transport_close(sock);
       return 1;
     }
   }
 
-  close(sock);
-  return set_auto_off(sock, ao);
+  const int status = set_auto_off(sock, ao);
+  transport_close(sock);
+  return status;
 }
 
 enum NoiseCancelling get_noise_cancelling(const char *arg) {
@@ -262,6 +268,7 @@ static int do_set_noise_cancelling(char *address, const char *arg) {
   if (nc == NC_UNKNOWN) {
     fprintf(stderr, "Invalid noise cancelling argument: %s\n", arg);
     usage();
+    transport_close(sock);
     return 1;
   }
 
@@ -269,17 +276,19 @@ static int do_set_noise_cancelling(char *address, const char *arg) {
   unsigned int index     = 0;
   int          status    = get_device_id(sock, &device_id, &index);
   if (status) {
+    transport_close(sock);
     return status;
   }
 
   if (!has_noise_cancelling(device_id)) {
     fprintf(stderr, "This device does not have noise cancelling.\n");
     usage();
+    transport_close(sock);
     return 1;
   }
 
   status = set_noise_cancelling(sock, nc);
-  close(sock);
+  transport_close(sock);
   return status;
 }
 
@@ -354,6 +363,7 @@ static int do_get_device_status(char *address) {
   int status = get_device_status(sock, name, &promptLanguage, &autoOff,
                                  &noiseCancelling);
   if (status) {
+    transport_close(sock);
     return status;
   }
 
@@ -397,12 +407,13 @@ static int do_get_device_status(char *address) {
       cancellingLevel = "off";
       break;
     default:
+      transport_close(sock);
       return 1;
     }
     printf("\tNoise Cancelling: %s\n", cancellingLevel);
   }
 
-  close(sock);
+  transport_close(sock);
   return 0;
 }
 
@@ -428,11 +439,12 @@ static int do_set_pairing(char *address, const char *arg) {
   if (p == P_UNKNOWN) {
     fprintf(stderr, "Invalid pairing argument: %s\n", arg);
     usage();
+    transport_close(sock);
     return 1;
   }
 
   const int status = set_pairing(sock, p);
-  close(sock);
+  transport_close(sock);
   return status;
 }
 
@@ -466,11 +478,12 @@ static int do_set_self_voice(char *address, const char *arg) {
   if (p == SV_UNKNOWN) {
     fprintf(stderr, "Invalid self voice argument: %s\n", arg);
     usage();
+    transport_close(sock);
     return 1;
   }
 
   const int status = set_self_voice(sock, p);
-  close(sock);
+  transport_close(sock);
   return status;
 }
 
@@ -484,12 +497,13 @@ static int do_get_firmware_version(char *address) {
   int  status = get_firmware_version(sock, version);
 
   if (status) {
+    transport_close(sock);
     return status;
   }
 
   printf("%s\n", version);
 
-  close(sock);
+  transport_close(sock);
   return 0;
 }
 
@@ -503,12 +517,13 @@ static int do_get_serial_number(char *address) {
   int  status = get_serial_number(sock, serial);
 
   if (status) {
+    transport_close(sock);
     return status;
   }
 
   printf("%s\n", serial);
 
-  close(sock);
+  transport_close(sock);
   return 0;
 }
 
@@ -522,12 +537,13 @@ static int do_get_battery_level(char *address) {
   int          status = get_battery_level(sock, &level);
 
   if (status) {
+    transport_close(sock);
     return status;
   }
 
   printf("%u\n", level);
 
-  close(sock);
+  transport_close(sock);
   return 0;
 }
 
@@ -570,6 +586,7 @@ static int do_get_paired_devices(char *address) {
 
   int status = get_paired_devices(sock, devices, &num_devices, &connected);
   if (status) {
+    transport_close(sock);
     return status;
   }
 
@@ -579,6 +596,7 @@ static int do_get_paired_devices(char *address) {
            "(0x01 and 0x03)."
            "\n",
            connected);
+    transport_close(sock);
     return 1;
   }
 
@@ -591,16 +609,17 @@ static int do_get_paired_devices(char *address) {
     struct Device device;
     status = get_device_info(sock, devices[i], &device);
     if (status) {
+      transport_close(sock);
       return status;
     }
 
-    const int max_address_convert = 18;
-    char      address_converted[max_address_convert];
+    char address_converted[18];
     reverse_ba2str(&device.address, address_converted);
 
     char status_symbol = get_paired_device_status(device.status);
 
     if (status_symbol == ':') {
+      transport_close(sock);
       return 1;
     }
 
@@ -611,7 +630,7 @@ static int do_get_paired_devices(char *address) {
   printf("\t[!] Indicates the current device.\n");
   printf("\t[*] Indicates other connected devices.\n");
 
-  close(sock);
+  transport_close(sock);
   return 0;
 }
 
@@ -625,7 +644,7 @@ static int do_connect_device(char *address, const char *arg) {
   reverse_str2ba(arg, &bd_address);
   int connection = connect_device(sock, bd_address);
 
-  close(sock);
+  transport_close(sock);
   return connection;
 }
 
@@ -638,7 +657,7 @@ static int do_disconnect_device(char *address, const char *arg) {
   reverse_str2ba(arg, &bd_address);
   int disconnection = disconnect_device(sock, bd_address);
 
-  close(sock);
+  transport_close(sock);
   return disconnection;
 }
 
@@ -651,7 +670,7 @@ static int do_remove_device(char *address, const char *arg) {
   reverse_str2ba(arg, &bd_address);
   int removed = remove_device(sock, bd_address);
 
-  close(sock);
+  transport_close(sock);
   return removed;
 }
 
@@ -666,12 +685,13 @@ static int do_get_device_id(char *address) {
   int          status    = get_device_id(sock, &device_id, &index);
 
   if (status) {
+    transport_close(sock);
     return status;
   }
 
   printf("0x%04x | Index: %u\n", device_id, index);
 
-  close(sock);
+  transport_close(sock);
   return 0;
 }
 
@@ -686,6 +706,7 @@ static int do_send_packet(char *address, const char *arg) {
   uint8_t send[char_type_pointer_size / 2];
   for (size_t i = 0; arg[i * 2]; ++i) {
     if (str_to_byte(&arg[i * 2], &send[i]) != 0) {
+      transport_close(sock);
       return 1;
     }
   }
@@ -693,6 +714,7 @@ static int do_send_packet(char *address, const char *arg) {
   uint8_t received[MAX_BT_PACK_LEN];
   int     received_n = send_packet(sock, send, sizeof(send), received);
   if (received_n < 0) {
+    transport_close(sock);
     return received_n;
   }
 
@@ -702,47 +724,25 @@ static int do_send_packet(char *address, const char *arg) {
   }
   printf("\n");
 
-  close(sock);
+  transport_close(sock);
   return 0;
 }
 
 int get_socket(char *address) {
-  static const struct timeval send_timeout    = {5, 0};
-  static const struct timeval receive_timeout = {1, 0};
-  int sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-
-  if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &send_timeout,
-                 sizeof(send_timeout)) < 0) {
-    perror("Could not set socket send timeout");
-    close(sock);
+  if (parse_bdaddr(address, NULL) != 0) {
+    fprintf(stderr, "Invalid bluetooth address: %s\n", address);
     return -1;
   }
 
-  if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
-                 sizeof(receive_timeout)) < 0) {
-    perror("Could not set socket receive timeout");
-    close(sock);
-    return -1;
-  }
-
-  struct sockaddr_rc sock_address;
-  sock_address.rc_family  = AF_BLUETOOTH;
-  sock_address.rc_channel = BOSE_CHANNEL;
-  if (str2ba(address, &sock_address.rc_bdaddr) != 0) {
-    fprintf(stderr, "Invalid bluetooth sock_address: %s\n", address);
-    close(sock);
-    return -1;
-  }
-  if (connect(sock, (struct sockaddr *)&sock_address, sizeof(sock_address)) !=
-      0) {
+  int sock = transport_open(address, BOSE_CHANNEL);
+  if (sock < 0) {
     perror("Could not connect to Bluetooth device");
-    close(sock);
     return -1;
   }
 
   int connection = init_connection(sock);
   if (connection) {
-    close(sock);
+    transport_close(sock);
     return -1;
   }
 

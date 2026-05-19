@@ -1,8 +1,8 @@
 #ifndef BOSE_CONNECT_APP_LINUX_SRC_LIBRARY_BASED_H
 #define BOSE_CONNECT_APP_LINUX_SRC_LIBRARY_BASED_H
 
-#include <bluetooth/bluetooth.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "bluetooth.h"
 
@@ -10,7 +10,7 @@
 #define MAX_NAME_LEN         0x20
 #define MAX_NUM_DEVICES      8
 #define MAX_BT_PACK_LEN      0x1000
-#define VER_STR_LEN          6
+#define VER_STR_LEN          64
 #define VP_MASK              0x7fu
 #define MAX_SERIAL_SIZE      0x100
 #define DEVICE_ALIGNED_BYTES 64

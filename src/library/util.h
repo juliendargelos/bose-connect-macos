@@ -1,8 +1,10 @@
 #ifndef BOSE_CONNECT_APP_LINUX_SRC_LIBRARY_UTIL_H
 #define BOSE_CONNECT_APP_LINUX_SRC_LIBRARY_UTIL_H
 
-#include <bluetooth/bluetooth.h>
+#include <stddef.h>
 #include <stdint.h>
+
+#include "bluetooth.h"
 
 #define MAX_HEXADECIMAL_UNIT 16
 #define MAX_DECIMAL_UNIT     10

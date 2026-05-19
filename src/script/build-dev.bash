@@ -8,6 +8,12 @@ cd ..
 
 rm -fR ./build
 
+if command -v nproc >/dev/null 2>&1; then
+  JOBS="$(nproc)"
+else
+  JOBS="$(sysctl -n hw.logicalcpu)"
+fi
+
 cmake \
   -S . \
   -B ./build \
@@ -18,7 +24,7 @@ cmake \
 cmake \
   --build ./build \
   --config Debug \
-  --parallel "$(nproc)"
+  --parallel "${JOBS}"
 
 # Uncomment when the create the tests
 # ctest -C Release
